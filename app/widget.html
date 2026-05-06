@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html lang="es">
+  <head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>VALIDACIÓN ARCHIVOS ADJUNTOS</title>
+    <script src="https://live.zwidgets.com/js-sdk/1.5/ZohoEmbededAppSDK.min.js"></script>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.8/dist/css/bootstrap.min.css" rel="stylesheet" integrity="sha384-sRIl4kxILFvY47J16cr9ZwB07vP4J8+LH7qKQnuqkuIAvNWLzeN8tE5YBujZqJLB" crossorigin="anonymous">
+    
+</head>
+  <body>
+
+    <div class="container mt-4">
+      <div class="text-bg-dark p-3 sticky-top container-fluid d-flex align-items-center">
+        <h3 class="h3 mb-0 flex-grow-1 text-center">VALIDACIÓN ARCHIVOS ADJUNTOS</h3>
+        <div data-bs-theme="dark" class="ms-auto">
+          <button id="closeButton" type="button" class="btn-close" aria-label="Close"></button>
+        </div>
+      </div>
+      <div class="container mt-4">
+          <span class="badge text-bg-warning fs-5">Debe cargar los documentos solicitados para continuar</span>
+      </div>
+      <div class="container mt-4">
+        
+        <div class="input-group mb-3 file-field" style="display:none">
+          <input type="file" class="form-control" id="inputGroupFile1">
+          <label class="input-group-text" for="inputGroupFile1">Pruebas saber11</label>
+        </div>
+        <div class="input-group mb-3 file-field" style="display:none">
+          <input type="file" class="form-control" id="inputGroupFile2">
+          <label class="input-group-text" for="inputGroupFile2">Cédula</label>
+        </div>
+        <div class="input-group mb-3 file-field" style="display:none">
+          <input type="file" class="form-control" id="inputGroupFile3">
+          <label class="input-group-text" for="inputGroupFile3">Acta bachiller</label>
+        </div>
+        <div class="input-group mb-3 file-field" style="display:none">
+          <input type="file" class="form-control" id="inputGroupFile4">
+          <label class="input-group-text" for="inputGroupFile4">Diploma bachiller</label>
+        </div>
+        <div class="input-group mb-3 file-field" style="display:none">
+          <input type="file" class="form-control" id="inputGroupFile5">
+          <label class="input-group-text" for="inputGroupFile5">Acta pregrado</label>
+        </div>
+        <div class="input-group mb-3 file-field" style="display:none">
+          <input type="file" class="form-control" id="inputGroupFile6">
+          <label class="input-group-text" for="inputGroupFile6">Diploma pregrado</label>
+        </div>
+        <div class="input-group mb-3 file-field" style="display:none">
+          <input type="file" class="form-control" id="inputGroupFile7">
+          <label class="input-group-text" for="inputGroupFile7">Pruebas saberpro</label>
+        </div>
+      </div>
+      
+      
+      <div class="container mt-4">
+        <span id="mensaje-error" class="badge text-bg-danger fs-6"></span>
+        <span id="mensaje-ok" class="badge text-bg-success fs-6"></span>
+
+      </div>
+      <br>
+      <div class="d-grid gap-2 d-md-block text-center">
+        <button id="cancelButton" class="btn btn-light">Cerrar</button>
+        <button id="sendButton" class="btn btn-primary">Enviar</button>
+        <script type="module" src="index.js"></script>
+        <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.8/dist/js/bootstrap.bundle.min.js" integrity="sha384-FKyoEForCGlyvwx9Hj09JcYn3nv7wiPVlz7YYwJrWVcXK/BmnVDxM+D2scQbITxI" crossorigin="anonymous"></script>
+    </div>
+  </div>
+  </body>
+</html>
