@@ -175,7 +175,7 @@ ZOHO.embeddedApp.on("PageLoad", function (data) {
                 } catch (upErr) {
                     console.error('Error subiendo archivo', fileToSend.name, upErr);
                 }
-                ///ENVIAR ARCHIVO A GCP
+                ///ENVIAR ARCHIVO A AWS
                 try {
                     const doc = getGlobalDoc();
                     const programName = getGlobalPrograma();
