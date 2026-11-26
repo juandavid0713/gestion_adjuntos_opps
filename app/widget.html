@@ -6,7 +6,316 @@
     <title>VALIDACIÓN ARCHIVOS ADJUNTOS</title>
     <script src="https://live.zwidgets.com/js-sdk/1.5/ZohoEmbededAppSDK.min.js"></script>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.8/dist/css/bootstrap.min.css" rel="stylesheet" integrity="sha384-sRIl4kxILFvY47J16cr9ZwB07vP4J8+LH7qKQnuqkuIAvNWLzeN8tE5YBujZqJLB" crossorigin="anonymous">
-    
+    <style>
+      /* ===================================================================
+         Estilos del widget (solo presentación, encima de Bootstrap 5.3.8).
+         REGLAS QUE NO SE DEBEN ROMPER:
+           - La visibilidad de .file-field, de los .mb-3 de los campos
+             obligatorios, de #mensaje-error-validacion-documento y de
+             #reintentarValidacion la controla index.js con style inline:
+             aquí NO se define "display" para esos elementos.
+           - No se renombran clases ni ids.
+           - Los colores semánticos de #mensaje-error-validacion-documento
+             (text-bg-danger/warning/success) los alterna index.js; solo se
+             ajustan por id, nunca la clase utilitaria global.
+         =================================================================== */
+      :root {
+        --zet-navy: #16324f;
+        --zet-navy-dark: #0f2439;
+        --zet-navy-soft: #eaf1f7;
+        --zet-accent: #2f6690;
+        --zet-bg: #f5f7fa;
+        --zet-surface: #ffffff;
+        --zet-border: #e4e8ee;
+        --zet-border-strong: #d0d7de;
+        --zet-text: #1f2933;
+        --zet-text-soft: #344054;
+        --zet-text-muted: #5b6b7c;
+        --zet-radius: 10px;
+        --zet-radius-sm: 6px;
+      }
+
+      body {
+        padding-bottom: 1.5rem;
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+          "Helvetica Neue", Arial, sans-serif;
+        font-size: 0.875rem;
+        line-height: 1.5;
+        color: var(--zet-text);
+        background-color: var(--zet-bg);
+        -webkit-font-smoothing: antialiased;
+      }
+
+      /* ---------- Panel principal ---------- */
+      body > .container {
+        max-width: 760px;
+        padding: 1rem 1.25rem 1.25rem;
+        background-color: var(--zet-surface);
+        border: 1px solid var(--zet-border);
+        border-radius: var(--zet-radius);
+        box-shadow: 0 1px 2px rgba(16, 24, 40, 0.06),
+          0 12px 32px rgba(16, 24, 40, 0.05);
+      }
+
+      /* Los .container anidados solo agrupan bloques: sin padding ni ancho
+         extra, para que todo quede alineado con el borde del panel. */
+      body > .container .container {
+        width: 100%;
+        max-width: 100%;
+        padding-right: 0;
+        padding-left: 0;
+      }
+      body > .container > .container.mt-4 {
+        margin-top: 1rem !important;
+      }
+
+      /* ---------- Encabezado ---------- */
+      body > .container > .text-bg-dark {
+        top: 0;
+        z-index: 1030;
+        padding: 0.7rem 1rem !important;
+        background-color: var(--zet-navy) !important;
+        border: 1px solid var(--zet-navy);
+        border-radius: var(--zet-radius-sm);
+        box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08);
+      }
+      body > .container > .text-bg-dark .h3 {
+        font-size: clamp(0.9375rem, 2.4vw, 1.0625rem);
+        font-weight: 600;
+        letter-spacing: 0.06em;
+        text-transform: uppercase;
+        color: #ffffff;
+      }
+      #closeButton {
+        opacity: 0.7;
+        transition: opacity 0.15s ease;
+      }
+      #closeButton:hover,
+      #closeButton:focus-visible {
+        opacity: 1;
+      }
+      #closeButton:focus-visible {
+        outline: 2px solid rgba(255, 255, 255, 0.7);
+        outline-offset: 2px;
+        box-shadow: none;
+      }
+
+      /* ---------- Aviso informativo ---------- */
+      body > .container > .container .badge.text-bg-info {
+        display: block;
+        padding: 0.6rem 0.85rem;
+        font-size: 0.8125rem !important;
+        font-weight: 500;
+        line-height: 1.45;
+        color: var(--zet-navy) !important;
+        text-align: left;
+        white-space: normal;
+        background-color: var(--zet-navy-soft) !important;
+        border-left: 3px solid var(--zet-accent);
+        border-radius: var(--zet-radius-sm);
+      }
+
+      /* ---------- Campos del formulario ---------- */
+      body .form-label {
+        margin-bottom: 0.35rem;
+        font-size: 0.8125rem;
+        font-weight: 600;
+        color: var(--zet-text-soft);
+        letter-spacing: 0.01em;
+      }
+      body .form-label .text-danger {
+        color: #b42318 !important;
+      }
+      body .form-control {
+        min-height: 40px;
+        padding: 0.5rem 0.65rem;
+        font-size: 0.875rem;
+        color: var(--zet-text);
+        background-color: #ffffff;
+        border: 1px solid var(--zet-border-strong);
+        border-radius: var(--zet-radius-sm);
+        box-shadow: none;
+        transition: border-color 0.15s ease, box-shadow 0.15s ease;
+      }
+      body .form-control:focus {
+        color: var(--zet-text);
+        background-color: #ffffff;
+        border-color: var(--zet-accent);
+        box-shadow: 0 0 0 3px rgba(47, 102, 144, 0.15);
+      }
+
+      /* ---------- Archivos: etiqueta fija + botón neutro ---------- */
+      body .input-group-text {
+        display: flex;
+        align-items: center;
+        justify-content: flex-start;
+        min-width: 8.75rem;
+        padding: 0.5rem 0.75rem;
+        font-size: 0.8125rem;
+        font-weight: 500;
+        color: var(--zet-text-soft);
+        text-align: left;
+        white-space: normal;
+        background-color: #f8fafc;
+        border: 1px solid var(--zet-border-strong);
+      }
+      body input[type="file"].form-control {
+        min-height: 40px;
+        padding: 0.25rem 0.5rem;
+        cursor: pointer;
+      }
+      body input[type="file"].form-control::file-selector-button {
+        padding: 0.4rem 0.75rem;
+        margin: -0.25rem 0.75rem -0.25rem -0.5rem;
+        font-size: 0.8125rem;
+        font-weight: 500;
+        color: var(--zet-navy);
+        cursor: pointer;
+        background-color: #eef2f6;
+        border: 0;
+        border-right: 1px solid var(--zet-border-strong);
+        border-radius: 0;
+        transition: background-color 0.15s ease;
+      }
+      body input[type="file"].form-control:hover::file-selector-button {
+        background-color: #e2e9f0;
+      }
+
+      /* Nota "Solo se admiten archivos PDF" */
+      body .file-field small.badge.text-bg-warning {
+        display: inline-block;
+        margin-top: 0.35rem;
+        padding: 0.2rem 0.5rem;
+        font-size: 0.75rem;
+        font-weight: 500;
+        line-height: 1.4;
+        color: #7a5b12 !important;
+        background-color: #fff8e6 !important;
+        border: 1px solid #f0e0b6;
+        border-radius: 4px;
+      }
+
+      /* ---------- Mensajes ---------- */
+      body #mensaje-error,
+      body #mensaje-ok,
+      body #mensaje-error-validacion-documento {
+        display: block;
+        width: 100%;
+        max-width: 100%;
+        padding: 0.6rem 0.8rem;
+        font-size: 0.8125rem;
+        font-weight: 500;
+        line-height: 1.45;
+        text-align: left;
+        white-space: normal;
+        overflow-wrap: anywhere;
+        border: 1px solid transparent;
+        border-radius: var(--zet-radius-sm);
+      }
+      body #mensaje-error:empty,
+      body #mensaje-ok:empty {
+        display: none;
+      }
+      body #mensaje-error.text-bg-danger,
+      body #mensaje-error-validacion-documento.text-bg-danger {
+        color: #ffffff !important;
+        background-color: #a4262c !important;
+      }
+      body #mensaje-ok.text-bg-success {
+        color: #ffffff !important;
+        background-color: #1e7a4f !important;
+      }
+      body #mensaje-error-validacion-documento.text-bg-warning {
+        color: #7a5b12 !important;
+        background-color: #fff8e6 !important;
+        border-color: #f0e0b6 !important;
+      }
+      body #reintentarValidacion {
+        margin-top: 0.5rem;
+        padding: 0.35rem 0.7rem;
+        font-size: 0.8125rem;
+        font-weight: 500;
+        color: var(--zet-text-soft);
+        background-color: #ffffff;
+        border: 1px solid var(--zet-border-strong);
+        border-radius: var(--zet-radius-sm);
+      }
+      body #reintentarValidacion:hover {
+        color: var(--zet-navy);
+        background-color: #f2f5f8;
+        border-color: #b9c4cf;
+      }
+
+      /* ---------- Botones de acción ---------- */
+      body #sendButton,
+      body #cancelButton {
+        min-width: 8.5rem;
+        padding: 0.55rem 1.25rem;
+        font-size: 0.875rem;
+        font-weight: 600;
+        border-radius: var(--zet-radius-sm);
+        transition: background-color 0.15s ease, border-color 0.15s ease,
+          box-shadow 0.15s ease;
+      }
+      body #sendButton {
+        color: #ffffff;
+        background-color: var(--zet-navy);
+        border: 1px solid var(--zet-navy);
+      }
+      body #sendButton:hover:not(:disabled) {
+        color: #ffffff;
+        background-color: var(--zet-navy-dark);
+        border-color: var(--zet-navy-dark);
+      }
+      body #sendButton:focus-visible,
+      body #cancelButton:focus-visible {
+        outline: none;
+        box-shadow: 0 0 0 3px rgba(47, 102, 144, 0.35);
+      }
+      body #sendButton:disabled,
+      body #sendButton.disabled {
+        color: #ffffff;
+        background-color: #b3bfcb;
+        border-color: #b3bfcb;
+        opacity: 1;
+      }
+      body #cancelButton {
+        color: var(--zet-text-soft);
+        background-color: #ffffff;
+        border: 1px solid var(--zet-border-strong);
+      }
+      body #cancelButton:hover {
+        color: var(--zet-text);
+        background-color: #f2f5f8;
+        border-color: #b9c4cf;
+      }
+
+      /* ---------- Ajustes para pantallas angostas (iframe de Zoho) ---------- */
+      @media (max-width: 575.98px) {
+        body > .container {
+          padding: 0.75rem 0.85rem 1rem;
+          border-radius: 8px;
+        }
+        body > .container > .text-bg-dark {
+          padding: 0.6rem 0.75rem !important;
+        }
+        body .input-group-text {
+          min-width: 7.25rem;
+          padding: 0.5rem 0.6rem;
+          font-size: 0.75rem;
+        }
+        body #sendButton,
+        body #cancelButton {
+          width: 100%;
+        }
+      }
+
+      @media (prefers-reduced-motion: reduce) {
+        body * {
+          transition: none !important;
+        }
+      }
+    </style>
 </head>
   <body>
 
@@ -18,13 +327,37 @@
         </div>
       </div>
       <div class="container mt-4">
-          <span class="badge text-bg-warning fs-5">Debe cargar los documentos solicitados para continuar</span>
+          <span class="badge text-bg-info fs-5">Debe cargar los documentos solicitados para continuar</span>
       </div>
       <div class="container mt-4">
-        
-        <div class="input-group mb-3 file-field" style="display:none">
-          <input type="file" class="form-control" id="inputGroupFile1">
-          <label class="input-group-text" for="inputGroupFile1">Pruebas saber11</label>
+        <!-- Campos obligatorios: su visibilidad la decide showFieldsForProgram
+             según el tipo de programa (pregrado/postgrado). En pregrado y
+             postgrado se piden PRIMERO el número de registro y la fecha de
+             aplicación; los archivos aparecen cuando ambos están diligenciados.
+             NO llevan la clase "file-field" porque no son archivos. Arrancan
+             ocultos (display:none) para que no se muestren si la oportunidad no
+             llega a cargarse. -->
+        <div class="mb-3" style="display:none">
+          <label for="numeroRegistro" class="form-label">Número de registro <span class="text-danger">*</span></label>
+          <input type="text" class="form-control" id="numeroRegistro" required>
+        </div>
+        <div class="mb-3" style="display:none">
+          <label for="fechaAplicacionPrueba" class="form-label">Fecha de aplicación prueba <span class="text-danger">*</span></label>
+          <input type="date" class="form-control" id="fechaAplicacionPrueba" required>
+        </div>
+        <div class="mb-3 file-field" style="display:none">
+          <div class="input-group">
+            <input type="file" class="form-control" id="inputGroupFile1" accept="application/pdf,.pdf">
+            <label class="input-group-text" for="inputGroupFile1">Pruebas saber11</label>
+          </div>
+          <small class="form-text badge text-bg-warning">Solo se admiten archivos PDF</small>
+        </div>
+        <div class="mb-3 file-field" style="display:none">
+          <div class="input-group">
+            <input type="file" class="form-control" id="inputGroupFile7" accept="application/pdf,.pdf">
+            <label class="input-group-text" for="inputGroupFile7">Pruebas saberpro</label>
+          </div>
+          <small class="form-text badge text-bg-warning">Solo se admiten archivos PDF</small>
         </div>
         <div class="input-group mb-3 file-field" style="display:none">
           <input type="file" class="form-control" id="inputGroupFile2">
@@ -46,22 +379,30 @@
           <input type="file" class="form-control" id="inputGroupFile6">
           <label class="input-group-text" for="inputGroupFile6">Diploma pregrado</label>
         </div>
-        <div class="input-group mb-3 file-field" style="display:none">
-          <input type="file" class="form-control" id="inputGroupFile7">
-          <label class="input-group-text" for="inputGroupFile7">Pruebas saberpro</label>
-        </div>
       </div>
       
       
       <div class="container mt-4">
         <span id="mensaje-error" class="badge text-bg-danger fs-6"></span>
         <span id="mensaje-ok" class="badge text-bg-success fs-6"></span>
-
+      </div>
+      <div class="container mt-4">
+        <span id="mensaje-error-validacion-documento" class="badge text-bg-danger fs-6 text-wrap" style="display:none"></span>
+        <!-- Solo se muestra cuando el agente no pudo validar (error de red/OCR):
+             permite reintentar con el MISMO archivo, porque volver a elegirlo no
+             dispara el evento change del input. -->
+        <button id="reintentarValidacion" type="button" class="btn btn-sm btn-outline-secondary ms-2 align-middle" style="display:none">Reintentar validación</button>
       </div>
       <br>
       <div class="d-grid gap-2 d-md-block text-center">
         <button id="cancelButton" class="btn btn-light">Cerrar</button>
-        <button id="sendButton" class="btn btn-primary">Enviar</button>
+        <button id="sendButton" class="btn btn-primary" disabled>Enviar</button>
+        <!-- Librerías de extracción de texto del adjunto (versiones fijas):
+             pdf-parse 2.4.5 -> global PdfParse (PDF digital + rasterizado)
+             tesseract.js 5.1.1 -> global Tesseract (OCR, español+inglés)
+             Deben cargarse ANTES del módulo index.js. -->
+        <script src="https://cdn.jsdelivr.net/npm/pdf-parse@2.4.5/dist/pdf-parse/web/pdf-parse.umd.js"></script>
+        <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/tesseract.min.js"></script>
         <script type="module" src="index.js"></script>
         <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.8/dist/js/bootstrap.bundle.min.js" integrity="sha384-FKyoEForCGlyvwx9Hj09JcYn3nv7wiPVlz7YYwJrWVcXK/BmnVDxM+D2scQbITxI" crossorigin="anonymous"></script>
     </div>
