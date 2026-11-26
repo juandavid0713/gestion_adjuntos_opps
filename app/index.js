@@ -85,15 +85,18 @@ ZOHO.embeddedApp.on("PageLoad", function (data) {
           (body SIN "attachments" y sin subida a ZFS) junto con el contexto
           del formulario (programa, tipo de prueba, registro y fecha) y
           muestra el loader "Validando documento con el agente...".
-       3. evaluateAgentResponse(): interpreta la respuesta del agente.
-          PRIORIDAD: el JSON estructurado { estado_definitivo,
-          documento_estudiante, tipo_documento, coincidencia_identidad,
-          justificacion } (ver REGLAS DE DECISIÓN en app/global.js). Cuando la
-          validación NO permite enviar ('invalid' / 'unknown'), el mensaje que
-          se pinta en #mensaje-error-validacion-documento es la "justificacion"
-          del agente (o un texto genérico de respaldo si no viene). Si el JSON
-          no llega o está mal formado, se usa el respaldo de siempre (flags +
-          palabras clave).
+       3. evaluateAgentResponse(): decide la IDENTIDAD y el TIPO DE DOCUMENTO
+          con la respuesta del agente y SIEMPRE contrasta los dígitos contra el
+          documento del CRM (verificación determinista: el LLM no puede afirmar
+          una coincidencia falsa). El número de registro y la fecha NO los
+          decide el agente: los evalúa validarDatosPrueba() en el paso 4. Si el
+          agente marca "no válido" por registro/fecha, se delega en esas reglas
+          (así no bloquea un documento correcto por contar mal un dígito).
+          Cuando la validación NO permite enviar ('invalid' / 'unknown'), el
+          mensaje que se pinta en #mensaje-error-validacion-documento es el
+          determinista o la "justificacion" del agente. Si el JSON no llega o
+          está mal formado, se usa el respaldo de siempre (flags + palabras
+          clave).
        4. validarDatosPrueba() (PASO 1b de global.js): reglas deterministas
           del instructivo ICFES sobre el número de registro y la fecha de
           aplicación. Se combinan con el resultado del agente: si las reglas
@@ -371,7 +374,8 @@ ZOHO.embeddedApp.on("PageLoad", function (data) {
             // número no coincida con el del CRM.
             const evaluacion = evaluateAgentResponse(respuesta.response, {
                 textoDocumento: extraccion.texto,
-                documentoCrm: getGlobalDoc()
+                documentoCrm: getGlobalDoc(),
+                tipoPrograma: getGlobalTipoPrograma()
             });
             identidadValidada = { status: evaluacion.status, message: evaluacion.message || '' };
             // Campos extra del JSON del agente (opcionales, no rompen {status, message})
@@ -563,6 +567,19 @@ ZOHO.embeddedApp.on("PageLoad", function (data) {
     CAMPOS_OBLIGATORIOS.forEach(id => {
         const el = document.getElementById(id);
         if (!el) return;
+        // Normaliza el número de registro a MAYÚSCULAS mientras el usuario
+        // escribe: así los valores (AC…, VG…, EK…, CONVENIO…) quedan
+        // consistentes sin importar cómo los haya tecleado el asesor.
+        if (id === 'numeroRegistro') {
+            el.addEventListener('input', function () {
+                const inicio = el.selectionStart;
+                const fin = el.selectionEnd;
+                if (el.value !== el.value.toUpperCase()) {
+                    el.value = el.value.toUpperCase();
+                    try { el.setSelectionRange(inicio, fin); } catch (e) { /* ignora */ }
+                }
+            });
+        }
         el.addEventListener('input', alCambiarDatosPrueba);
         el.addEventListener('change', alCambiarDatosPrueba);
     });

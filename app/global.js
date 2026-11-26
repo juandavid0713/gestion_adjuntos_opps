@@ -1812,20 +1812,32 @@ const recortarTexto = (texto, max) => (texto.length > max ? texto.slice(0, max) 
        "justificacion": "Explicación concisa (máximo 2 líneas) de los hallazgos."
      }
 
-   Los campos de registro/fecha son INFORMATIVOS: la decisión del widget sigue
-   siendo "estado_definitivo" + "coincidencia_identidad" y, además, las reglas
-   deterministas de validarDatosPrueba() (PASO 1b), que se aplican aunque el
-   agente omita esos campos.
+   REPARTO DE RESPONSABILIDADES (importante):
+     - El AGENTE decide solo lo que requiere leer el documento: identidad
+       (documento_estudiante / coincidencia_identidad), tipo_documento y, con
+       él, la correspondencia programa ↔ prueba.
+     - El NÚMERO DE REGISTRO y la FECHA los decide SIEMPRE validarDatosPrueba()
+       (PASO 1b), de forma determinista. El agente solo los REPORTA
+       (numero_registro_adjunto, validacion_codigo, validacion_fecha, errores):
+       no puede bloquear por ellos. Motivo real: el LLM afirmó «dígito 3 = 1»
+       sobre un código cuyo tercer carácter era 9 y rechazó un documento
+       correcto.
 
    REGLAS DE DECISIÓN (orden de PRECEDENCIA, implementadas en
    evaluarRespuestaJson()):
-     1. coincidencia_identidad === false -> NO VÁLIDO (bloquea): el adjunto NO
-        coincide con el número de documento del estudiante.
-     2. tipo_documento === "No reconocido" -> NO VÁLIDO (bloquea): el agente no
-        logró reconocer el documento. (Constante TIPO_DOC_NO_RECONOCIDO: si se
-        prefiere otra conducta, cambiar aquí.)
-     3. estado_definitivo normalizado (minúsculas y SIN acentos) "no válido"
-        -> NO VÁLIDO (bloquea).
+     0. documento_estudiante === "NO_ENCONTRADO" -> 'unknown' (fallo de lectura,
+        permite reintentar; NO es un rechazo).
+     1. IDENTIDAD por comparación determinista de dígitos (agente + extracción
+        local contra el CRM): número distinto -> NO VÁLIDO con mensaje
+        determinista. Si el agente dice `coincidencia_identidad: false` pero el
+        texto contiene el número del CRM, se ignora el booleano; si no hay
+        número legible que confirme nada -> 'unknown'.
+     2. tipo_documento === "No reconocido" -> NO VÁLIDO.
+     2b. tipo_documento del otro tipo de prueba que el programa -> NO VÁLIDO
+        (pregrado/técnico exigen Saber 11; postgrado, Saber Pro).
+     3. estado_definitivo "no válido" con identidad y tipo de documento
+        confirmados -> se DELEGA en las reglas deterministas de registro/fecha
+        (devuelve 'valid'; si esas reglas fallan, el widget bloquea igual).
      4. estado_definitivo "válido" + coincidencia_identidad === true -> VÁLIDO
         (la coincidencia TRUE es REQUISITO para que sea válido).
      5. estado "válido" sin coincidencia confirmada, o estado no reconocido
@@ -1833,7 +1845,9 @@ const recortarTexto = (texto, max) => (texto.length > max ? texto.slice(0, max) 
 
    La "justificacion" es lo que se muestra al usuario en #mensaje-error
    cuando la validación NO permite enviar (status 'invalid' o 'unknown'); si
-   viniera vacía se usa un texto genérico de respaldo.
+   viniera vacía se usa un texto genérico de respaldo. Los mensajes de las
+   reglas deterministas (identidad, tipo de documento, programa ↔ prueba)
+   SIEMPRE sustituyen a la justificación del LLM.
 
    Si el JSON viene mal formado, no trae "estado_definitivo" o la respuesta no
    es JSON, evaluarRespuestaJson() devuelve null y evaluateAgentResponse()
@@ -1851,6 +1865,8 @@ const MSG_JSON_DESCONOCIDA_GENERICA = 'No se pudo determinar la validez del docu
 // El agente no logró LEER la identificación (típico de una imagen borrosa):
 // no es prueba de invalidez, así que se trata como 'unknown' (permite reintentar).
 const MSG_JSON_SIN_IDENTIFICACION = 'No se pudo leer el número de documento del adjunto. Cargue una imagen más nítida o use "Reintentar validación".';
+// El agente no reconoció el documento como certificado ICFES.
+const MSG_JSON_TIPO_DOC_NO_RECONOCIDO = 'El documento adjunto no corresponde a un certificado ICFES (Saber 11 o Saber Pro). Verifique el archivo.';
 // Tope de caracteres de la justificación que se pinta en la UI
 const MAX_CARACTERES_JUSTIFICACION = 500;
 
@@ -1959,6 +1975,99 @@ export const parsearJsonAgente = (raw) => {
 };
 
 /**
+ * Compara el número de documento del adjunto con el del CRM SIN confiar en el
+ * agente.
+ *
+ * El LLM puede afirmar `coincidencia_identidad: true` con números distintos
+ * (caso real: CRM 7997085 vs documento 79970859) o `false` cuando el texto sí
+ * contiene el número del CRM. La comparación se hace aquí, sobre dígitos.
+ *
+ * Números que se comparan:
+ *   1) el que informó el agente (`documento_estudiante`), si tiene longitud
+ *      de documento (6-11 dígitos);
+ *   2) el que se extrae localmente del texto con `extraerCandidatoIdentidad()`.
+ * Basta con que CUALQUIERA de los dos coincida con el CRM: un fallo de lectura
+ * del LLM no debe rechazar un documento correcto.
+ *
+ * @param {string} documentoInformado  valor de "documento_estudiante" del JSON
+ * @param {{textoDocumento?:string, documentoCrm?:string}} contexto
+ * @returns {{estado:'match'|'conflict'|'unknown', candidato:string,
+ *            crmDigitos:string, message?:string}}
+ *   - 'match'    -> alguna lectura coincide con el CRM (identidad confirmada).
+ *   - 'conflict' -> hay un número legible y NINGUNO coincide con el CRM.
+ *   - 'unknown'  -> no hay CRM válido o no hay número legible que comparar.
+ */
+const verificarIdentidadAdjunto = (documentoInformado, contexto = {}) => {
+    const crmDigitos = normalizarCandidatoIdentidad(
+        (contexto.documentoCrm !== undefined && contexto.documentoCrm !== null && contexto.documentoCrm !== '')
+            ? contexto.documentoCrm
+            : getGlobalDoc()
+    );
+    if (crmDigitos.length < 6 || crmDigitos.length > 11) {
+        return { estado: 'unknown', candidato: '', crmDigitos: '' };
+    }
+
+    const leido = validarCandidatoIdentidad(documentoInformado);
+    const texto = (typeof contexto.textoDocumento === 'string') ? contexto.textoDocumento : '';
+    const local = texto.trim() !== '' ? extraerCandidatoIdentidad(texto) : '';
+
+    if (leido === crmDigitos || local === crmDigitos) {
+        return { estado: 'match', candidato: crmDigitos, crmDigitos: crmDigitos };
+    }
+    const candidato = leido || local;
+    if (!candidato) {
+        return { estado: 'unknown', candidato: '', crmDigitos: crmDigitos };
+    }
+    return {
+        estado: 'conflict',
+        candidato: candidato,
+        crmDigitos: crmDigitos,
+        message: 'El número de documento del adjunto (' + candidato +
+            ') no coincide con el registrado en la oportunidad (' + crmDigitos + '). Verifique el archivo.'
+    };
+};
+
+/** Nombre legible del tipo de programa (para mensajes de error). */
+const nombrePrograma = (tipoPrograma) => {
+    const p = normalizarTexto(tipoPrograma);
+    if (p === 'postgrado' || p === 'posgrado') return 'postgrado';
+    if (p === 'tecnico') return 'técnico';
+    if (p === 'pregrado') return 'pregrado';
+    return '';
+};
+
+/** Tipo de prueba que declara el campo `tipo_documento` del agente. */
+const tipoPruebaPorTipoDocumento = (tipoDocumento) => {
+    const t = normalizarTexto(tipoDocumento);
+    if (t === normalizarTexto('Saber 11')) return TIPO_PRUEBA_SABER11;
+    if (t === normalizarTexto('Saber Pro')) return TIPO_PRUEBA_SABERPRO;
+    return '';
+};
+
+/**
+ * Comprueba que el documento reconocido por el agente corresponda a la prueba
+ * que exige el tipo de programa (Paso 0 del prompt). Es DETERMINISTA: solo
+ * depende de `tipo_documento` y del tipo de programa, no de lo que el agente
+ * concluya. `Saber TyT` no se clasifica (no hay regla en el instructivo), así
+ * que no bloquea por sí solo.
+ *
+ * @param {string} tipoDocumento  "Saber 11" | "Saber Pro" | "Saber TyT" | ...
+ * @param {string} tipoPrograma   "pregrado" | "postgrado" | "tecnico"
+ * @returns {{status:'invalid', message:string}|null}
+ */
+const verificarPruebaDelDocumento = (tipoDocumento, tipoPrograma) => {
+    const esperado = tipoPruebaPorPrograma(tipoPrograma);
+    const leido = tipoPruebaPorTipoDocumento(tipoDocumento);
+    if (!esperado || !leido || leido === esperado) return null;
+    return {
+        status: 'invalid',
+        message: 'El adjunto corresponde a ' + nombrePrueba(leido) + ', pero el programa es de ' +
+            nombrePrograma(tipoPrograma) + ' y exige ' + nombrePrueba(esperado) +
+            ': adjunte el certificado correcto.'
+    };
+};
+
+/**
  * Evalúa el JSON del agente contra las REGLAS DE DECISIÓN (ver cabecera de
  * esta sección). La "justificacion" se devuelve como `message` en los casos
  * bloqueantes ('invalid' y 'unknown') para que se muestre en #mensaje-error.
@@ -1994,9 +2103,6 @@ export const evaluarRespuestaJson = (json, contexto = {}) => {
     const mensajeDesconocida = justificacion
         ? recortarTexto(justificacion, MAX_CARACTERES_JUSTIFICACION)
         : MSG_JSON_DESCONOCIDA_GENERICA;
-    const mensajeSinIdentificacion = justificacion
-        ? recortarTexto(justificacion, MAX_CARACTERES_JUSTIFICACION)
-        : MSG_JSON_SIN_IDENTIFICACION;
 
     // El agente puede devolver booleanos o strings ("true"/"false"/"sí")
     const esFalse = (v) => v === false || normalizarTexto(v) === 'false' ||
@@ -2021,62 +2127,89 @@ export const evaluarRespuestaJson = (json, contexto = {}) => {
     // una imagen más nítida, en vez de un 'invalid' sin salida.
     if (documentoEstudiante.replace(/[\s_]+/g, '').toLowerCase() === 'noencontrado') {
         console.warn('[ZET][Agente] JSON: documento_estudiante = NO_ENCONTRADO -> UNKNOWN (posible fallo de OCR).');
-        return resultado('unknown', mensajeSinIdentificacion);
+        return resultado('unknown', MSG_JSON_SIN_IDENTIFICACION);
     }
 
-    // REGLA 1: el adjunto NO coincide con el número de documento -> bloquea
-    if (esFalse(coincidencia)) {
-        console.error('[ZET][Agente] JSON: coincidencia_identidad = false -> NO VÁLIDO. documento_estudiante:', documentoEstudiante);
+    // REGLA 1: IDENTIDAD por comparación DETERMINISTA de dígitos.
+    // No depende del veredicto del agente: aunque diga "válido" (coincidencia
+    // falsa) o "no válido", si el número del adjunto no coincide con el del
+    // CRM el mensaje que se muestra es este, no la justificación del LLM (que
+    // puede afirmar coincidencias falsas o inventar valores de dígitos).
+    const identidad = verificarIdentidadAdjunto(documentoEstudiante, contexto);
+    if (identidad.estado === 'conflict') {
+        console.error('[ZET][Agente] VERIFICACIÓN DETERMINISTA: ' + identidad.message);
+        return resultado('invalid', identidad.message);
+    }
+    // El agente dice que NO coincide. Si la comprobación local tampoco puede
+    // confirmar la coincidencia (no hay número legible), es una lectura
+    // fallida: 'unknown' (reintento), nunca un rechazo definitivo. Si hay
+    // documento en el CRM y el texto SÍ lo contiene, se ignora el booleano.
+    if (esFalse(coincidencia) && identidad.estado !== 'match') {
+        if (identidad.crmDigitos) {
+            console.error('[ZET][Agente] JSON: coincidencia_identidad = false y no hay número legible que la confirme -> UNKNOWN.');
+            return resultado('unknown', MSG_JSON_SIN_IDENTIFICACION);
+        }
+        console.error('[ZET][Agente] JSON: coincidencia_identidad = false (sin documento en el CRM para contrastar) -> NO VÁLIDO.');
         return resultado('invalid', mensajeInvalida);
     }
-    // REGLA 2: el agente no reconoció el documento -> bloquea (ajustable:
-    // constante TIPO_DOC_NO_RECONOCIDO)
+    if (esFalse(coincidencia)) {
+        console.warn('[ZET][Agente] El agente marcó coincidencia_identidad = false, pero el número del texto SÍ coincide con el CRM: se ignora el booleano.');
+    }
+
+    // REGLA 2: el agente no reconoció el documento -> bloquea (constante
+    // TIPO_DOC_NO_RECONOCIDO: si se prefiere otra conducta, cambiar aquí).
     if (tipoDocumento !== '' && normalizarTexto(tipoDocumento) === TIPO_DOC_NO_RECONOCIDO) {
         console.error('[ZET][Agente] JSON: tipo_documento "No reconocido" -> NO VÁLIDO. documento_estudiante:', documentoEstudiante);
-        return resultado('invalid', mensajeInvalida);
+        return resultado('invalid', MSG_JSON_TIPO_DOC_NO_RECONOCIDO);
     }
-    // REGLA 3: estado_definitivo "no válido" -> bloquea
+
+    // REGLA 2b: la prueba del documento no corresponde al tipo de programa
+    // (Paso 0). Determinista: un certificado Saber Pro en pregrado se rechaza
+    // aunque el agente diga "válido".
+    const pruebaIncorrecta = verificarPruebaDelDocumento(tipoDocumento, contexto.tipoPrograma);
+    if (pruebaIncorrecta) {
+        console.error('[ZET][Agente] VERIFICACIÓN DETERMINISTA (programa ↔ prueba): ' + pruebaIncorrecta.message);
+        return resultado('invalid', pruebaIncorrecta.message);
+    }
+
+    // REGLA 3: el agente dice "no válido". Lo que el LLM sí podía decidir ya se
+    // comprobó arriba de forma determinista (identidad, tipo de documento y
+    // correspondencia programa ↔ prueba). Los motivos que quedan son de número
+    // de registro o de fecha, que validarDatosPrueba() evalúa sin LLM: se
+    // delega en esas reglas devolviendo 'valid' (identidad confirmada). Así el
+    // agente no puede bloquear un documento correcto por, por ejemplo, contar
+    // mal un dígito del código.
     if (estadoNorm === ESTADO_DEF_JSON_NO_VALIDO) {
+        const tipoReconocido = tipoDocumento !== '' && normalizarTexto(tipoDocumento) !== TIPO_DOC_NO_RECONOCIDO;
+        if (identidad.estado === 'match' && tipoReconocido) {
+            console.warn('[ZET][Agente] JSON: "no válido" por registro/fecha; se delega en las reglas ' +
+                'deterministas de validarDatosPrueba(). Justificación del agente:', justificacion || '(vacía)');
+            return resultado('valid', '');
+        }
+        if (identidad.crmDigitos && identidad.estado !== 'match') {
+            console.error('[ZET][Agente] JSON: "no válido" sin identidad verificable -> UNKNOWN.');
+            return resultado('unknown', MSG_JSON_SIN_IDENTIFICACION);
+        }
         console.error('[ZET][Agente] JSON: estado_definitivo "no válido" -> NO VÁLIDO. documento_estudiante:', documentoEstudiante);
-        return resultado('invalid', mensajeInvalida);
+        return resultado('invalid', MSG_JSON_INVALIDA_GENERICA);
     }
     // REGLA 4: estado "válido" + coincidencia confirmada -> VÁLIDO (message '')
     if (estadoNorm === ESTADO_DEF_JSON_VALIDO) {
         if (esTrue(coincidencia)) {
-            // REGLA 4.1 — VERIFICACIÓN DETERMINISTA ANTES DE ACEPTAR.
-            // El LLM puede afirmar coincidencia_identidad: true aunque los
-            // números difieran (caso real: CRM 103707777 vs documento
-            // 1026591722). Si tenemos el documento del CRM y el agente informa
-            // el número leído, se comparan aquí, sin confiar en el booleano.
+            // La comparación de dígitos ya se hizo arriba con
+            // verificarIdentidadDeterminista() (para CUALQUIER veredicto).
+            // Aquí solo falta exigir que el agente haya informado el número
+            // leído cuando el CRM es verificable: sin ese dato no hay forma de
+            // confirmar la coincidencia.
             const crmDigitos = normalizarCandidatoIdentidad(
                 (contexto.documentoCrm !== undefined && contexto.documentoCrm !== null && contexto.documentoCrm !== '')
                     ? contexto.documentoCrm
                     : getGlobalDoc()
             );
-            const documentoLeido = normalizarCandidatoIdentidad(documentoEstudiante);
             const crmVerificable = crmDigitos.length >= 6 && crmDigitos.length <= 11;
-            if (crmVerificable) {
-                if (!documentoLeido) {
-                    console.error('[ZET][Agente] JSON: el agente dice "válido" pero NO informó documento_estudiante; no se puede verificar -> UNKNOWN.');
-                    return resultado('unknown', 'El agente no informó el número de documento leído; no se puede verificar la coincidencia con la oportunidad. Reintente la validación.');
-                }
-                if (documentoLeido !== crmDigitos) {
-                    // El agente leyó un número distinto. Antes de rechazar, se
-                    // comprueba la extracción LOCAL del mismo texto: si esa sí
-                    // coincide exacta con el CRM, el error fue del agente (OCR
-                    // del LLM) y la identidad está confirmada.
-                    const textoLocal = (typeof contexto.textoDocumento === 'string') ? contexto.textoDocumento : '';
-                    const candidatoLocal = textoLocal ? extraerCandidatoIdentidad(textoLocal) : '';
-                    if (candidatoLocal && candidatoLocal === crmDigitos) {
-                        console.warn('[ZET][Agente] El agente informó "' + documentoLeido +
-                            '" pero la extracción local coincide con el CRM ("' + crmDigitos + '"). Se acepta la verificación local.');
-                    } else {
-                        console.error('[ZET][Agente] VERIFICACIÓN LOCAL: documento del adjunto (' + documentoLeido +
-                            ') != documento del CRM (' + crmDigitos + '). Se rechaza aunque el agente diga válido.');
-                        return resultado('invalid', 'El número de documento del adjunto (' + documentoLeido +
-                            ') no coincide con el registrado en la oportunidad (' + crmDigitos + '). Verifique el archivo.');
-                    }
-                }
+            if (crmVerificable && !validarCandidatoIdentidad(documentoEstudiante)) {
+                console.error('[ZET][Agente] JSON: el agente dice "válido" pero NO informó documento_estudiante; no se puede verificar -> UNKNOWN.');
+                return resultado('unknown', 'El agente no informó el número de documento leído; no se puede verificar la coincidencia con la oportunidad. Reintente la validación.');
             }
             console.log('[ZET][Agente] JSON: estado_definitivo "válido" + coincidencia_identidad true -> VÁLIDO. documento_estudiante:', documentoEstudiante);
             return resultado('valid', '');
@@ -2094,46 +2227,43 @@ export const evaluarRespuestaJson = (json, contexto = {}) => {
  * Verificación INDEPENDIENTE del agente sobre el TEXTO que se le envió.
  *
  * El LLM puede afirmar `coincidencia_identidad: true` aunque los números
- * difieran (caso real: CRM 103707777 vs documento 1026591722). Por eso, antes
- * de aceptar un 'valid', se extrae el número de identificación del texto con
- * `extraerCandidatoIdentidad()` y se compara con el documento del CRM:
- *   - candidato distinto del CRM -> 'invalid' (aunque el agente diga válido)
- *   - candidato igual al CRM     -> se respeta la decisión del agente
- *   - sin candidato o sin CRM    -> se respeta la decisión del agente
- * Esto también cubre las respuestas de TEXTO PLANO ("el documento es válido"),
- * que no traen número y por tanto no se pueden contrastar de otra forma.
+ * difieran (caso real: CRM 7997085 vs documento 79970859, o CRM 103707777 vs
+ * documento 1026591722), y también lo contrario. Por eso se extrae el número de
+ * identificación del texto con `extraerCandidatoIdentidad()` y se compara con el
+ * del CRM:
+ *   - conflicto determinista -> 'invalid' con mensaje determinista, aunque el
+ *     agente diga "válido" o "no válido";
+ *   - coincidencia o datos insuficientes -> se respeta la decisión del agente;
+ *   - 'unknown' no se toca: es el flujo de reintento por fallo de OCR.
  *
  * @param {{status:string,message:string}} resultado decisión del agente
  * @param {{textoDocumento?:string, documentoCrm?:string}} contexto
  */
 const aplicarVerificacionLocal = (resultado, contexto = {}) => {
-    if (!resultado || resultado.status !== 'valid') return resultado;
+    if (!resultado) return resultado;
+    // Solo se revisan los veredictos que ya decidieron algo. 'unknown' se deja
+    // intacto a propósito: es el flujo de "Reintentar validación" cuando el
+    // documento no se pudo leer (fallo de OCR), y no debe convertirse en un
+    // rechazo definitivo por un número leído a medias.
+    if (resultado.status !== 'valid' && resultado.status !== 'invalid') return resultado;
 
-    const crmDigitos = normalizarCandidatoIdentidad(
-        (contexto.documentoCrm !== undefined && contexto.documentoCrm !== null && contexto.documentoCrm !== '')
-            ? contexto.documentoCrm
-            : getGlobalDoc()
-    );
-    if (crmDigitos.length < 6 || crmDigitos.length > 11) return resultado;
+    // Para el JSON estructurado ya se verificó con el número que informó el
+    // agente; esta llamada cubre el flujo de respaldo (texto plano) y es
+    // idempotente: si ya hay conflicto, devuelve el mismo mensaje determinista.
+    const identidad = verificarIdentidadAdjunto('', contexto);
+    if (identidad.estado !== 'conflict') return resultado;
 
-    const texto = (typeof contexto.textoDocumento === 'string') ? contexto.textoDocumento : '';
-    if (texto.trim() === '') return resultado;
-
-    const candidato = extraerCandidatoIdentidad(texto);
-    if (!candidato) {
-        console.warn('[ZET][Agente] Verificación local: no se localizó identificación en el texto; se usa la decisión del agente.');
-        return resultado;
+    if (resultado.status === 'valid') {
+        console.error('[ZET][Agente] VERIFICACIÓN LOCAL: se rechaza el "válido" del agente. ' +
+            identidad.message);
+    } else {
+        console.warn('[ZET][Agente] VERIFICACIÓN LOCAL: se reemplaza el mensaje del agente por el ' +
+            'determinista. ' + identidad.message);
     }
-    if (candidato !== crmDigitos) {
-        console.error('[ZET][Agente] VERIFICACIÓN LOCAL: candidato del texto (' + candidato +
-            ') != documento del CRM (' + crmDigitos + '). Se rechaza aunque el agente diga válido.');
-        return Object.assign({}, resultado, {
-            status: 'invalid',
-            message: 'El número de documento del adjunto (' + candidato +
-                ') no coincide con el registrado en la oportunidad (' + crmDigitos + '). Verifique el archivo.'
-        });
-    }
-    return resultado;
+    return Object.assign({}, resultado, {
+        status: 'invalid',
+        message: identidad.message
+    });
 };
 
 /**

@@ -290,7 +290,9 @@
         border-color: #b9c4cf;
       }
 
-      /* ---------- Ajustes para pantallas angostas (iframe de Zoho) ---------- */
+      body #numeroRegistro {
+        text-transform: uppercase;
+      }
       @media (max-width: 575.98px) {
         body > .container {
           padding: 0.75rem 0.85rem 1rem;
@@ -339,7 +341,7 @@
              llega a cargarse. -->
         <div class="mb-3" style="display:none">
           <label for="numeroRegistro" class="form-label">Número de registro <span class="text-danger">*</span></label>
-          <input type="text" class="form-control" id="numeroRegistro" required>
+          <input type="text" class="form-control" id="numeroRegistro" oninput="this.value = this.value.toUpperCase()" required>
         </div>
         <div class="mb-3" style="display:none">
           <label for="fechaAplicacionPrueba" class="form-label">Fecha de aplicación prueba <span class="text-danger">*</span></label>
