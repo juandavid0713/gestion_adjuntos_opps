@@ -203,6 +203,8 @@ El número de registro es el **código ICFES de la prueba**, NO la identificaci�
 
 **Nunca** tomes como registro: la identificación, el DANE, el SNIES, el número de verificación del certificado (8 dígitos al pie), puntajes ni fechas.
 
+> **Fecha de presentación/aplicación (obligatoria de reportar):** el mismo documento trae la fecha real en que se presentó la prueba («Aplicación del examen», «Fecha de presentación», «Fecha de aplicación», «Fecha de Examen»). Léela y repórtala en `validacion_fecha` y en `errores`. El widget extrae esa fecha del PDF y la compara con la fecha diligenciada por el usuario; si no coinciden, bloquea el envío. El veredicto (`estado_definitivo`) no depende de ella.
+
 > Si el documento NO contiene un número de registro legible, devuelve `numero_registro_adjunto: "NO_ENCONTRADO"`. Eso NO es prueba de invalidez: es un fallo de lectura (ver Paso 11).
 
 ---

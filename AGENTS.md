@@ -61,6 +61,9 @@ de Zia Agents y sube los archivos a WorkDrive + AWS.
     año de la fecha = año del código.
   - Saber Pro: `EK` + números de 14–20 o `gradopostumo`; fecha > 14/10/2009.
   - El registro leído del PDF debe coincidir EXACTAMENTE con el diligenciado.
+  - La **fecha de presentación/aplicación leída del PDF** (`extraerFechaAplicacion`) debe
+    coincidir EXACTAMENTE con la fecha diligenciada. Si no se puede leer la fecha del
+    PDF, no se bloquea (no hay comparación).
   - Sin registro legible en el PDF → `unknown` (permite reintentar), no `invalid`.
 - El resultado del agente se cachea por archivo (`identidadValidada`); corregir
   registro/fecha recalcula las reglas locales sin volver a llamar al agente.

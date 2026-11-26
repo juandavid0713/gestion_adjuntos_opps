@@ -1255,6 +1255,131 @@ export const extraerNumeroRegistro = (texto) => {
 };
 
 /**
+ * Extrae la FECHA DE APLICACIÓN / PRESENTACIÓN de la prueba del texto del
+ * adjunto (Saber 11 o Saber Pro). Devuelve la fecha en ISO `AAAA-MM-DD` o ''
+ * si no se pudo leer.
+ *
+ * Formatos soportados (los que aparecen en los certificados/reports ICFES):
+ *   - "Aplicación del examen:" + fecha en la línea siguiente (DD/MM/AAAA)
+ *   - "Fecha de aplicación del examen: 27 DE AUGUST DE 2017"
+ *   - "Fecha de Examen: Septiembre 13 de 2009"
+ *   - "Fecha de aplicación:\t29 de noviembre de 2020"
+ *   - "FECHA DE PRESENTACIÓN DEL EXAMEN ..." + "05/12/2020 ..." (certificado)
+ *   - informe antiguo: "AC9721345065 23 de Agosto de 1997 29 de Octubre de 2026"
+ *
+ * Es tolerante a mayúsculas/minúsculas y a meses en español o inglés. Si hay
+ * varias fechas en la misma línea, toma la primera (la de presentación viene
+ * antes que la de expedición/impresión).
+ */
+const MESES_FECHA = {
+    enero: 1, ene: 1, january: 1, jan: 1,
+    febrero: 2, feb: 2, february: 2,
+    marzo: 3, mar: 3, march: 3,
+    abril: 4, abr: 4, april: 4, apr: 4,
+    mayo: 5, may: 5,
+    junio: 6, jun: 6, june: 6,
+    julio: 7, jul: 7, july: 7,
+    agosto: 8, ago: 8, aug: 8, august: 8,
+    septiembre: 9, sep: 9, set: 9, september: 9, sept: 9,
+    octubre: 10, oct: 10, october: 10,
+    noviembre: 11, nov: 11, november: 11,
+    diciembre: 12, dic: 12, dec: 12, december: 12
+};
+
+const normalizarMesFecha = (nombre) => {
+    const k = String(nombre || '').toLowerCase()
+        .normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim();
+    return MESES_FECHA[k] || 0;
+};
+
+const isoDePartes = (dia, mes, anio) => {
+    const d = Number(dia), m = Number(mes), a = Number(anio);
+    if (!d || !m || !a) return '';
+    if (d < 1 || d > 31 || m < 1 || m > 12) return '';
+    let anioFinal = a;
+    if (a < 100) anioFinal = a >= 96 ? 1900 + a : 2000 + a;
+    if (anioFinal < 1900 || anioFinal > 2200) return '';
+    return anioFinal + '-' + String(m).padStart(2, '0') + '-' + String(d).padStart(2, '0');
+};
+
+const extraerPrimeraFecha = (texto) => {
+    const t = String(texto || '');
+    // 1) DD/MM/AAAA o DD-MM-AAAA (formato colombiano)
+    let m = t.match(/(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{2,4})/);
+    if (m) {
+        const iso = isoDePartes(m[1], m[2], m[3]);
+        if (iso) return iso;
+    }
+    // 2) "DD de MES de AAAA" (español) o "DD MES AAAA"
+    m = t.match(/(\d{1,2})\s+(?:de\s+)?([a-záéíóúñ]+)\s+(?:de\s+)?(\d{4})/i);
+    if (m && normalizarMesFecha(m[2])) {
+        const iso = isoDePartes(m[1], normalizarMesFecha(m[2]), m[3]);
+        if (iso) return iso;
+    }
+    // 3) "MES DD de AAAA" / "MES DD, AAAA" / "MES DD AAAA" (inglés u otros)
+    m = t.match(/([a-záéíóúñ]+)\s+(\d{1,2})(?:\s+de)?[\s,]+(\d{4})/i);
+    if (m && normalizarMesFecha(m[1])) {
+        const iso = isoDePartes(m[2], normalizarMesFecha(m[1]), m[3]);
+        if (iso) return iso;
+    }
+    // 4) "DD MES AAAA" todo en mayúsculas (ej. "27 DE AUGUST DE 2017")
+    m = t.match(/(\d{1,2})\s+([A-ZÁÉÍÓÚÑ]+)\s+(\d{4})/);
+    if (m && normalizarMesFecha(m[2])) {
+        const iso = isoDePartes(m[1], normalizarMesFecha(m[2]), m[3]);
+        if (iso) return iso;
+    }
+    return '';
+};
+
+export const extraerFechaAplicacion = (texto) => {
+    const t = String(texto === null || texto === undefined ? '' : texto);
+    if (!t.trim()) return '';
+    const lineas = t.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
+
+    const esEtiquetaAplicacion = (l) =>
+        /aplicaci[oó]n\s+del\s+examen/i.test(l) ||
+        /fecha\s+de\s+presentaci[oó]n/i.test(l) ||
+        /fecha\s+de\s+aplicaci[oó]n/i.test(l) ||
+        /fecha\s+de\s+examen/i.test(l) ||
+        /fecha\s+del\s+examen/i.test(l);
+
+    const esLineaIgnorable = (l) =>
+        /acta\s+de\s+grado/i.test(l) ||
+        /publicaci[oó]n\s+de\s+resultados/i.test(l) ||
+        /impresi[oó]n\s+del\s+certificado/i.test(l) ||
+        /fecha\s+de\s+expedici[oó]n/i.test(l);
+
+    // 1) Etiqueta de aplicación: fecha en la misma línea o en las 2 siguientes
+    for (let i = 0; i < lineas.length; i++) {
+        if (esEtiquetaAplicacion(lineas[i]) && !esLineaIgnorable(lineas[i])) {
+            let f = extraerPrimeraFecha(lineas[i]);
+            if (f) return f;
+            for (let j = i + 1; j < Math.min(i + 3, lineas.length); j++) {
+                if (esLineaIgnorable(lineas[j])) continue;
+                f = extraerPrimeraFecha(lineas[j]);
+                if (f) return f;
+            }
+        }
+    }
+    // 2) Líneas que contienen un código de registro (informe antiguo): la
+    //    fecha de presentación viene justo después del código.
+    for (const l of lineas) {
+        if (esLineaIgnorable(l)) continue;
+        if (/[A-Z]{2}\d{10,}/.test(l)) {
+            const f = extraerPrimeraFecha(l);
+            if (f) return f;
+        }
+    }
+    // 3) Respaldo: primera fecha de cualquier línea no ignorable
+    for (const l of lineas) {
+        if (esLineaIgnorable(l)) continue;
+        const f = extraerPrimeraFecha(l);
+        if (f) return f;
+    }
+    return '';
+};
+
+/**
  * Año de presentación codificado en un código Saber 11 (AC/VG), según las
  * reglas del instructivo. Devuelve null si el código no permite determinarlo
  * (longitud 13, "CONVENIO ...", etc.).
@@ -1560,6 +1685,20 @@ export const validarDatosPrueba = (datos = {}) => {
         ? validarFechaSaberPro(datos.fechaAplicacion, { fechaGrado: datos.fechaGrado })
         : validarFechaSaber11(datos.fechaAplicacion, registroAdjunto, opcionesFecha);
     errores.push(...validacionFecha.errores);
+
+    // 5c) La fecha de presentación/aplicación leída del adjunto debe coincidir
+    //     con la fecha diligenciada por el usuario. Comparación determinista:
+    //     el PDF es la fuente de verdad de la fecha real de la prueba.
+    const fechaAdjunto = extraerFechaAplicacion(texto);
+    if (fechaAdjunto && parsearFechaISO(datos.fechaAplicacion) &&
+        fechaAdjunto !== datos.fechaAplicacion) {
+        const fmtFecha = (iso) => {
+            const p = parsearFechaISO(iso);
+            return p ? (p.dia + '/' + String(p.mes).padStart(2, '0') + '/' + p.anio) : iso;
+        };
+        errores.push('La fecha de aplicación del adjunto (' + fmtFecha(fechaAdjunto) +
+            ') no coincide con la diligenciada (' + fmtFecha(datos.fechaAplicacion) + ').');
+    }
 
     // 5b) Si el usuario diligenció un código distinto al del adjunto, también se
     // valida ESE código contra la fecha: así se alerta, por ejemplo, de un código
